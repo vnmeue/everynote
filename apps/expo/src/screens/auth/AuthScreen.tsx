@@ -19,7 +19,7 @@ export const AuthScreen = () => {
     <View style={styles.container}>
       <View style={styles.logoContainer}>
         <Image
-          source={require("../../../assets/icon.png")}
+          source={require("../../../assets/icon-dark.png")}
           style={styles.logo}
           resizeMode="contain"
         />
