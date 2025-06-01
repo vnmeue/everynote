@@ -1,72 +1,107 @@
 import * as SQLite from "expo-sqlite";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { and, asc, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/expo-sqlite";
 
-import * as schema from "./schema";
+import { initDatabase } from "./init";
 
-// Open the database
-const sqlite = SQLite.openDatabaseSync("everynote.db");
-
-// Create the database instance
-export const db = drizzle(sqlite, { schema });
-
-export type Database = typeof db;
+// Initialize database
+export const db = initDatabase();
 
 // Helper function to get the current user ID
 export const getCurrentUserId = async () => {
   const token = await AsyncStorage.getItem("userToken");
   if (!token) throw new Error("No user token found");
-  return token; // Using token as userId for now
+  return token;
+};
+
+// Helper function to execute SQL queries
+const executeQuery = (query: string, params: any[] = []) => {
+  return new Promise<any>((resolve, reject) => {
+    db.transaction(
+      (tx: any) => {
+        tx.executeSql(query, params, (_: any, result: any) => {
+          resolve(result);
+        });
+      },
+      (error: any) => {
+        reject(error);
+      },
+    );
+  });
 };
 
 // Notes operations
 export const notesOperations = {
   async create(title: string, content: string, categoryId?: number) {
     const userId = await getCurrentUserId();
-    return db.insert(schema.notes).values({
+    const query = `
+      INSERT INTO notes (title, content, category_id, user_id)
+      VALUES (?, ?, ?, ?)
+    `;
+    const result = await executeQuery(query, [
       title,
       content,
-      categoryId,
+      categoryId || null,
       userId,
-    });
+    ]);
+    return result;
   },
 
   async update(
     id: number,
     data: { title?: string; content?: string; categoryId?: number },
   ) {
-    return db
-      .update(schema.notes)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(schema.notes.id, id));
+    const updates = [];
+    const params = [];
+
+    if (data.title) {
+      updates.push("title = ?");
+      params.push(data.title);
+    }
+    if (data.content) {
+      updates.push("content = ?");
+      params.push(data.content);
+    }
+    if (data.categoryId !== undefined) {
+      updates.push("category_id = ?");
+      params.push(data.categoryId);
+    }
+
+    updates.push('updated_at = strftime("%s", "now")');
+    params.push(id);
+
+    const query = `
+      UPDATE notes
+      SET ${updates.join(", ")}
+      WHERE id = ?
+    `;
+    return executeQuery(query, params);
   },
 
   async delete(id: number) {
-    return db.delete(schema.notes).where(eq(schema.notes.id, id));
+    const query = "DELETE FROM notes WHERE id = ?";
+    return executeQuery(query, [id]);
   },
 
   async getAll() {
     const userId = await getCurrentUserId();
-    return db
-      .select()
-      .from(schema.notes)
-      .where(eq(schema.notes.userId, userId))
-      .orderBy(desc(schema.notes.updatedAt));
+    const query = `
+      SELECT * FROM notes
+      WHERE user_id = ?
+      ORDER BY updated_at DESC
+    `;
+    const result = await executeQuery(query, [userId]);
+    return result.rows._array;
   },
 
   async getByCategory(categoryId: number) {
     const userId = await getCurrentUserId();
-    return db
-      .select()
-      .from(schema.notes)
-      .where(
-        and(
-          eq(schema.notes.userId, userId),
-          eq(schema.notes.categoryId, categoryId),
-        ),
-      )
-      .orderBy(desc(schema.notes.updatedAt));
+    const query = `
+      SELECT * FROM notes
+      WHERE user_id = ? AND category_id = ?
+      ORDER BY updated_at DESC
+    `;
+    const result = await executeQuery(query, [userId, categoryId]);
+    return result.rows._array;
   },
 };
 
@@ -74,29 +109,35 @@ export const notesOperations = {
 export const categoriesOperations = {
   async create(name: string) {
     const userId = await getCurrentUserId();
-    return db.insert(schema.categories).values({
-      name,
-      userId,
-    });
+    const query = `
+      INSERT INTO categories (name, user_id)
+      VALUES (?, ?)
+    `;
+    return executeQuery(query, [name, userId]);
   },
 
   async update(id: number, name: string) {
-    return db
-      .update(schema.categories)
-      .set({ name, updatedAt: new Date() })
-      .where(eq(schema.categories.id, id));
+    const query = `
+      UPDATE categories
+      SET name = ?, updated_at = strftime("%s", "now")
+      WHERE id = ?
+    `;
+    return executeQuery(query, [name, id]);
   },
 
   async delete(id: number) {
-    return db.delete(schema.categories).where(eq(schema.categories.id, id));
+    const query = "DELETE FROM categories WHERE id = ?";
+    return executeQuery(query, [id]);
   },
 
   async getAll() {
     const userId = await getCurrentUserId();
-    return db
-      .select()
-      .from(schema.categories)
-      .where(eq(schema.categories.userId, userId))
-      .orderBy(asc(schema.categories.name));
+    const query = `
+      SELECT * FROM categories
+      WHERE user_id = ?
+      ORDER BY name ASC
+    `;
+    const result = await executeQuery(query, [userId]);
+    return result.rows._array;
   },
 };
